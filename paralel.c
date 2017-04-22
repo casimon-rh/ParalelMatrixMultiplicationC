@@ -6,30 +6,56 @@
 #include <sys/wait.h>
 
 int main(){
-    //el primer elemento de la matriz va a ser el que indica en qué fila está
-    int second[3][4] = {{0,10,16,5},{1,2,4,2},{2,14,17,2}};
-    int first[4][3] = {{0,1,2},{19,16,18},{11,8,9},{8,9,5}};
-    int third[3][4] = {{0,0,0,0},{0,0,0,0},{0,0,0,0}};
 
     int nproc = 3, i=0, status=0,j=0,k=0;
     int ffilas = 3, fcolumnas = 4;
     int sfilas = 4, scolumnas = 3;
     int pipefd[2],nbytes;
     char buf;
+    srand(time(NULL));
+    //el primer elemento de la matriz va a ser el que indica en qué fila está
+    int **first = (int **) malloc(ffilas*sizeof(int *));
+    for(i =0; i<ffilas;i++ ){
+        first[i] = (int *) malloc(fcolumnas*sizeof(int));
+    }
+    for(i = 0; i<ffilas; i++){
+        first[i][0] = i;
+        for(j=1; j<fcolumnas; j++){
+            first[i][j]=rand()%20;
+        }
+    }
+    int **second = (int **) malloc(sfilas*sizeof(int *));
+    for(i =0; i<sfilas;i++ ){
+        second[i] = (int *) malloc(scolumnas*sizeof(int));
+    }
+    for(j = 0; j<scolumnas; j++){
+        second[0][j] = j;
+        for(i=1; i<sfilas; i++){
+            second[i][j]=rand()%20;
+        }
+    }
+    int **third = (int **) malloc(ffilas*sizeof(int *));
+    for(i =0; i<ffilas;i++ ){
+        third[i] = (int *) malloc(fcolumnas*sizeof(int));
+    }
+    for(i = 0; i<ffilas; i++){
+        for(j=0; j<fcolumnas; j++){
+            third[i][j]=0;
+        }
+    }
     
     for(i =0; i<nproc; i++){
-        int temp[4] = {0,0,0,0};
+        int *temp = malloc(fcolumnas * sizeof(int));
+        for(j=0; j<fcolumnas; j++){
+            temp[j]=0;
+        }
         pipe(pipefd);
         pid_t pid = fork();
         if(pid==0){//codigo hijo     
             temp[0]= i;
             for(j=1; j<fcolumnas; j++){
-                printf("-----------------\n");
                 for(k=1; k<sfilas; k++){
-                    printf("%d = %d*%d\n",temp[j],first[k-1][i+1],second[j][k-1]);
                     temp[j]+=first[k-1][i+1]*second[j][k-1];
-                    printf("%d\n",temp[j]);
-                    printf("____________\n");
                 }
             }
             close(pipefd[0]);
