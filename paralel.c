@@ -1,35 +1,35 @@
-#include <stdio.h>
+//gcc mutext.c -o mutex -DMUTEX -DFIN -lpthread
 #include <stdlib.h>
-#include <time.h>
+#include <stdio.h>
 #include <unistd.h>
-#include <string.h>
-#include <sys/wait.h>
+#include <pthread.h>
+#include <time.h>
+#include <sys/ipc.h>
+#include <sys/sem.h>
+#include <sys/types.h>
 
+#define nproc 100
+#define cuadrado 1000
+
+void *hijo();
+void waitS();
+void signalS();
+void printTodo();
+
+int semaforo;
+struct sembuf operacion;
+
+int **matriz2,**matriz1,**matriz3;
+
+//tamaño de matrices
+int FilasA = cuadrado, ColumnasA = cuadrado;
+int FilasB = cuadrado, ColumnasB = cuadrado;
 int main(){
-    int nproc = 2;//numero de procesos
     int i,j,k;//indices for
 
-    int active = 1;//numero de procesos activos
-    int current = 0;//proceso (hijo) en ejecucion
-    int status = 0;//variable para el wait
 
-    //tamaño de matrices
-    int FilasA = 3, ColumnasA = 3;
-    int FilasB = 3, ColumnasB = 3;
-
-    //pipe
-    int nbytes;
-
-    pid_t pid = 1, wpid;
-    srand(time(NULL));
-
-    int **pipes = (int **)malloc(nproc * sizeof(int *));
-    for(i = 0; i<nproc;i++){
-        pipes[i] = (int *) malloc(2*sizeof(int));
-    }
-
-    //Alocacion e inicializacion
-    int **matriz2 = (int **) malloc(FilasA*sizeof(int *));
+    //inicializacion
+    matriz2 = (int **) malloc(FilasA*sizeof(int *));
     for(i =0; i<FilasA;i++ ){
         matriz2[i] = (int *) malloc(ColumnasA*sizeof(int));
     }
@@ -39,7 +39,7 @@ int main(){
             matriz2[i][j]=nntmp;
         }
     }
-    int **matriz1 = (int **) malloc(FilasB*sizeof(int *));
+    matriz1 = (int **) malloc(FilasB*sizeof(int *));
     for(i =0; i<FilasB;i++ ){
         matriz1[i] = (int *) malloc(ColumnasB*sizeof(int));
     }
@@ -49,92 +49,126 @@ int main(){
             matriz1[i][j]=ntmp;
         }
     }
-    int **third = (int **) malloc(FilasA*sizeof(int *));
+    matriz3 = (int **) malloc(FilasA*sizeof(int *));
     for(i =0; i<FilasA;i++ ){
-        third[i] = (int *) malloc(ColumnasA*sizeof(int));
+        matriz3[i] = (int *) malloc(ColumnasA*sizeof(int));
     }
     for(i = 0; i<FilasA; i++){
         for(j=0; j<ColumnasA; j++){
-            third[i][j]=0;
+            matriz3[i][j]=0;
         }
     }
+    
+    //Creacion de la llave
+    key_t clave = ftok("/bin/ls",33);
+    //Creacion del semaforo
+    if((semaforo=semget(clave,2,0600 | IPC_CREAT))== -1){
+        printf("error semget\n");
+        exit(1);
+    }
+    //Inicializar semaforo
+    semctl(semaforo,0,SETVAL,1);
 
+    pthread_t hijos[nproc];
+    int aux[nproc];
+
+    #ifdef verbose
+    printf("Log:\n");
+    #endif
+    for(i=0; i<nproc; i++){
+        aux[i] = i+1;
+        pthread_create(&hijos[i],NULL,hijo, (void *)&aux[i]);
+        
+    }
+    for(i=0; i<nproc; i++){
+        pthread_join(hijos[i],NULL);
+    }
+    printTodo();
+    return 0;
+}
+void waitS(){
+    operacion.sem_num =0;
+    operacion.sem_op =-1;
+    operacion.sem_flg =SEM_UNDO;
+    if(semop(semaforo,&operacion,1)==-1){
+        printf("error semop\n");
+        exit(1);
+    }
+}
+void signalS()
+{
+    operacion.sem_num =0;
+    operacion.sem_op =1;
+    operacion.sem_flg =SEM_UNDO;
+    if(semop(semaforo,&operacion,1)==-1){
+        printf("error semop\n");
+        exit(1);
+    }
+}
+
+void *hijo(void * arg){
+    int current = *(int *)arg;
+    int i,j,k;//indices for
+    int factor =0;
+    
     for(i=0; i<FilasA; i++){
-        int *temp = malloc((ColumnasA +1) * sizeof(int));
-        for(j=0; j<=ColumnasA; j++){
-            temp[j]=0;
-        }
-        if(active <= nproc&& pid>0){
-            pipe(pipes[active-1]);
-            pid = fork();
-            //pids[active-1] = pid;
-            current = active;
-            active++;
-        }
-
-        if(pid==0){
-            printf("\tcurrent = %d, i=%d, nproc=%d, active=%d, i-nproc+1=%d, pid=%d\n",current,i,nproc,active,i-nproc+1, getpid());
-            if((current-1)== (i) || (i-nproc+1)==current){//debe o no debe
-                temp[0]=i;
-                for(j=0; j<ColumnasA; j++){
-                    for(k=0; k<FilasB; k++){
-                        temp[j+1]+=matriz2[k][i]*matriz1[j][k];
-                    }
+        if((nproc*factor)+(current-1)==i){//selector
+            #ifdef verbose
+                printf("(nproc[%d]*factor[%d])+(current[%d]-1)==i[%d]\n",nproc,factor,current,i);
+            #endif
+            waitS();
+            for(j=0; j<ColumnasA; j++){
+                for(k=0; k<FilasB; k++){
+                    matriz3[j][i]+=matriz2[k][i]*matriz1[j][k];
                 }
-                close(pipes[active-1][0]);
-                write(pipes[active-1][1],temp,4*sizeof(int));
-
-                printf("Resultado de la fila %d desde el hijo %d:\n",i,getpid());
-                for(j=0; j<=ColumnasA; j++){
-                    printf("|%d",temp[j]);
+            }
+            #ifdef verbose
+                printf("Resultado de la fila %d desde el hijo %d:\n",i,current);
+                for(j=0; j<ColumnasA; j++){
+                    printf("|%d",matriz3[j][i]);
                 }
                 printf("|\n");
-            }
-
-        }else if(pid >0){
-            //printf("El padre %d ejecuta en el indice %d\n",getpid(),i);
-            for(j =0; j<nproc;j++){
-                //while((wpid = wait(&status)) >0);
-                close(pipes[j][1]);
-                nbytes = read(pipes[j][0],temp,4*sizeof(int));
-                printf("Received pipes:\n");
-                for(j=0; j<ColumnasA; j++){
-                    printf("%d,",temp[0]);
-                    third[j][temp[0]] = temp[j+1];
-                }
-                printf("\n");
-            }
-
-            if(i==(FilasA-1)){
-                printf("_________________________________________________\n");                
-                for(j = 0; j<FilasB; j++){
-                    for(k=0; k<ColumnasB; k++){
-                        printf("|\t%d\t",matriz1[j][k]);
-                    }
-                    printf("|\n");
-                }
-                printf("_________________________________________________\n");
-                for(j = 0; j<FilasA; j++){
-                    for(k=0; k<ColumnasA; k++){
-                        printf("|\t%d\t",matriz2[j][k]);
-                    }
-                    printf("|\n");
-                }
-                printf("_________________________________________________\n");
-                for(j = 0; j<FilasA; j++){
-                    for(k=0; k<ColumnasA; k++){
-                        printf("|\t%d\t",third[j][k]);
-                    }
-                    printf("|\n");
-                }
-                printf("_________________________________________________\n");
-                return 0;
-            }
-            while((wpid = wait(&status)) >0);
-        }else{
-            printf("Error en fork");
-            exit(1);
+            #endif
+            signalS();
         }
+        factor+=(i+1==nproc*(factor+1));
     }
-    return 0;
+}
+void printTodo(){
+    int i,j,k;//indices for
+
+    printf("\n");
+    #ifdef verbose
+        printf("Matriz 1:\n");
+    #endif
+    for(j = 0; j<FilasB; j++){
+        for(k=0; k<ColumnasB; k++){
+            printf("|%d",matriz1[j][k]);
+        }
+        printf("|\n");
+    }
+    
+    printf("\n");
+    printf("\n");
+    #ifdef verbose
+        printf("Matriz 2:\n");
+    #endif
+    for(j = 0; j<FilasA; j++){
+        for(k=0; k<ColumnasA; k++){
+            printf("|%d",matriz2[j][k]);
+        }
+        printf("|\n");
+    }
+    
+    printf("\n");
+    printf("\n");
+    #ifdef verbose
+        printf("Matriz 3:\n");
+    #endif
+    for(j = 0; j<FilasA; j++){
+        for(k=0; k<ColumnasA; k++){
+            printf("|%d",matriz3[j][k]);
+        }
+        printf("|\n");
+    }
 }
